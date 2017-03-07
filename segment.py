@@ -6,11 +6,13 @@ from pprint import pprint
 import math
 import sys
 
-rel_rms_improvement = 0.05
-max_depth_of_tree = 10
-max_num_of_intervals = 5
+rel_rms_improvement = 0.05 #フィットの精度
+max_depth_of_tree = 10 #計算する深さ
+max_num_of_intervals = 5 #二次トレンドの最大数
+
 
 def residuals(arr_x,arr_y):
+	"""残差平方和を求める"""
 	A = np.ones((len(arr_x),2),float)
 	A[:,0]=arr_x
 	(p,residuals,rank,s) = np.linalg.lstsq(A,arr_y)
@@ -22,6 +24,7 @@ def residuals(arr_x,arr_y):
 	return err
 
 def get_rms(arr_x, arr_y, epoches):
+	"""区間分割後の誤差を求める"""
 	num_epoches = len(epoches)
 	error_fit = 0.0
 	for i in range(num_epoches-1):
@@ -34,6 +37,10 @@ def get_rms(arr_x, arr_y, epoches):
 
 
 def get_norm_error(arr_x,arr_y, epoches):
+	"""
+	ペーパー '2.2 Optimal piecewise linear approximation'の評価式
+	
+	"""
 	num_epoches = len(epoches)
 	error_zero = math.sqrt(residuals(arr_x,arr_y))
 	error_fit = 0.0
@@ -53,6 +60,7 @@ def get_norm_error(arr_x,arr_y, epoches):
 	return ret
 	
 def findmaxmin(arr_x,arr_y,offset):
+	"""残差が最大最小となるポイントを求める"""
 	coef=np.polyfit(arr_x,arr_y,1)
 	sz = len(arr_x)
 	
@@ -81,6 +89,7 @@ def findmaxmin(arr_x,arr_y,offset):
 	return (np.array(epoch)+offset).tolist()
 
 def findepoches(arr_x, arr_y,max_intervals):
+	"""区間を求める"""
 	sz = len(arr_x)	
 	epoches = [0,sz-1]
 	cnt = 0
@@ -100,8 +109,8 @@ def findepoches(arr_x, arr_y,max_intervals):
 	return epoches
 
 def findapproximation(arr_x, arr_y, max_intervals):
+	"""可能な区間の組み合わせの中から最適な区間を求める"""
 	from itertools import combinations
-
 	epoches = findepoches(arr_x,arr_y, max_intervals)	
 	
 	sz=len(epoches)
@@ -112,14 +121,13 @@ def findapproximation(arr_x, arr_y, max_intervals):
 	for i in range(1,sz-1):
 		combin_list.append([epoches[0],epoches[i],epoches[sz-1]])
 
-	
+
 	for i in range(2,sz-2):
 		combis = list(combinations(epoches[1:sz-1],i))
 		sizer = len(combis)
 		for j in range(sizer):
 			combin_list.append([epoches[0]]+list(combis[j])+[epoches[sz-1]])
-			
-	
+
 	numepoch = len(combin_list)
 	
 	error_list = [] 
@@ -134,6 +142,7 @@ def findapproximation(arr_x, arr_y, max_intervals):
 
 
 def draw_plot(arr_x,arr_y,plot_title):
+	"""データをプロット"""
 	plot(arr_x,arr_y,'-')
 	title(plot_title)
 	xlabel("X")
@@ -142,6 +151,7 @@ def draw_plot(arr_x,arr_y,plot_title):
 
 
 def draw_line(arr_x,arr_y,epoches):
+	"""フィットしたラインをプロット"""
 	sz= len(epoches)
 	for i in range(sz-1):
 		j0=epoches[i]
@@ -153,12 +163,17 @@ def draw_line(arr_x,arr_y,epoches):
 		line_y=[a*arr_x[j0]+b,a*arr_x[j1]+b]
 		plot(line_x,line_y,'ro-')
 
+
 if __name__ == "__main__":
+	"""メイン"""
+	#ファイルから読込み
 	arr_xy=np.loadtxt("./testdata/sample.dat", skiprows=1)
 	arr_x=np.asarray(arr_xy[:, 0])
 	arr_y=np.asarray(arr_xy[:, 1])
 	#arr_x=np.asarray([0,1,2,3,4])
 	#arr_y=np.asarray([10,25,40,35,50])
+
+	#計算用のバッファを初期化
 	approx_tree = [[]] * max_depth_of_tree
 	rms_tree =	np.zeros(max_depth_of_tree)
 	segments_number = np.zeros(max_depth_of_tree)
@@ -166,58 +181,64 @@ if __name__ == "__main__":
 	epoches=[0, arrlength-1]
 	approx_tree[0] = epoches
 		 
-	#// top level 
+	#分割無しの誤差をセット
 	rms_tree[0] = get_rms(arr_x,arr_y,epoches)
+	
 	for i in range(1,max_depth_of_tree): 
-		prev_epoch = approx_tree[i-1] # 直前のセグメント
+
+		prev_epoch = approx_tree[i-1] # 一つ前の分割結果
 		curr_epoches_num = len(prev_epoch) # 分割数
+		
 		rms_segments = [0.0]*(curr_epoches_num-1)
 		new_epoches=[[]] * (curr_epoches_num-1)
-		# ---
 		
 		for j in range(curr_epoches_num-1):
 			prev_begin = prev_epoch[j]
 			prev_end = prev_epoch[j+1]
-
+			#分割可能ならば
 			if(prev_end-prev_begin>2):
+				#最適な区間を求める
 				[epoches,rms_segments[j]] = findapproximation(
 												arr_x[prev_begin:prev_end+1],
 												arr_y[prev_begin:prev_end+1],
 												max_num_of_intervals)
-				
-				
+				#オフセット分ずらす
 				if prev_begin>0:
 					epoches = [v + prev_begin for v in epoches]
+				
 				new_num = len(epoches)
 				epoches = prev_epoch + epoches[1:new_num-1]
 				epoches.sort()
+				
+				#最新の誤差と分割結果をセット
 				rms_segments[j] = get_rms(arr_x,arr_y,epoches)
 				new_epoches[j]=epoches
 			else:
 		
 				new_epoches[j]=prev_epoch
 				rms_segments[j]=rms_tree[i-1]
-		
+		#誤差が最小となる最適な区間を取得
 		imin = rms_segments.index(min(rms_segments))
-
 		approx_tree[i] = new_epoches[imin]
+		#区間候補を追加
 		segments_number[i] = len(new_epoches[imin])-1
 		rms_tree[i]= rms_segments[imin]
-		
-		
 	
+	
+	#区間候補リストの精度を計算
 	rms_plot = rms_tree * (1.0/rms_tree[0])
 		
 	opt_level=-1
 	i=0;
 	sz=len(rms_plot)
+	#条件を満たす精度の区間を取得
 	for i in range(sz-1):
 		if(rms_plot[i]-rms_plot[i+1] < rel_rms_improvement):
 			opt_level=i
 			break;
-	
-	optimal_epoches = approx_tree[opt_level]
 
+	optimal_epoches = approx_tree[opt_level]
+	#プロット
 	draw_plot(arr_x,arr_y,"MTA analysis")
 	draw_line(arr_x,arr_y,optimal_epoches)
 	show()
